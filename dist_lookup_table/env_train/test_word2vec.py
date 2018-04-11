@@ -139,7 +139,7 @@ def train(use_cuda=False, is_sparse=True, is_local=False):
             params_grads,
             trainer_id,
             pservers=pserver_endpoints,
-            trainer_num=trainers)
+            trainers=trainers)
         with open("program.proto", "w") as f:
             f.write(str(fluid.default_main_program()))
         if training_role == "PSERVER":

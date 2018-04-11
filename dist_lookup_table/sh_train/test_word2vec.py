@@ -135,7 +135,7 @@ def train(
             params_grads,
             trainer_id,
             pservers=pserver_list,
-            trainer_num=trainer_num)
+            trainers=trainer_num)
         # with open("program.proto", "w") as f:
         #     f.write(str(fluid.default_main_program()))
         if training_role == "PSERVER":
