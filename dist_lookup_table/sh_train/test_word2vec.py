@@ -37,7 +37,7 @@ def train(
     IS_SPARSE = is_sparse
 
     def __network__(words):
-        id_distributed = True
+        id_distributed = False
         embed_first = fluid.layers.embedding(
             input=words[0],
             size=[dict_size, EMBED_SIZE],
@@ -92,6 +92,12 @@ def train(
         [first_word, second_word, third_word, forth_word, next_word])
 
     sgd_optimizer = fluid.optimizer.SGD(learning_rate=0.001)
+    # sgd_optimizer = fluid.optimizer.SGD(learning_rate=
+    #       fluid.layers.exponential_decay(
+    #         learning_rate=0.01,
+    #         decay_steps=100000,
+    #         decay_rate=0.5,
+    #         staircase=True))
     optimize_ops, params_grads = sgd_optimizer.minimize(avg_cost)
 
     train_reader = paddle.v2.batch(
@@ -131,17 +137,16 @@ def train(
     else:
         t = fluid.DistributeTranspiler()
         t.transpile(
-            optimize_ops,
-            params_grads,
             trainer_id,
+            sync_mode=False,
             pservers=pserver_list,
             trainers=trainer_num)
         # with open("program.proto", "w") as f:
         #     f.write(str(fluid.default_main_program()))
         if training_role == "PSERVER":
             pserver_prog = t.get_pserver_program(pserver_ip_port)
-            # with open("pserver.proto", "w") as f:
-            #     f.write(str(pserver_prog))
+            with open("pserver.proto." + str(pserver_ip_port), "w") as f:
+                f.write(str(pserver_prog))
             pserver_startup = t.get_startup_program(pserver_ip_port,
                                                     pserver_prog)
             # with open("startup.proto", "w") as f:
@@ -150,8 +155,8 @@ def train(
             exe.run(pserver_prog)
         elif training_role == "TRAINER":
             trainer_program = t.get_trainer_program()
-            # with open("trainer.proto", "w") as f:
-            #     f.write(str(trainer_program))
+            with open("trainer.proto." + str(trainer_id), "w") as f:
+                f.write(str(trainer_program))
             train_loop(trainer_program)
 
 
