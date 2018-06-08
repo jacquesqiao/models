@@ -10,8 +10,6 @@ import sys
 def train(use_cuda=False, is_sparse=True, is_local=True):
     PASS_NUM = 1000
     EMBED_SIZE = 1
-    HIDDEN_SIZE = 256
-    N = 5
     BATCH_SIZE = 32
     IS_SPARSE = is_sparse
     id_distributed = True
