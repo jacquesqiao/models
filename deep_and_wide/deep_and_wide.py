@@ -36,6 +36,11 @@ def train(use_cuda=False, is_sparse=True, is_local=True):
     sgd_optimizer = fluid.optimizer.SGD(learning_rate=0.001)
     optimize_ops, params_grads = sgd_optimizer.minimize(avg_cost)
 
+    with open("main.proto", "w") as f:
+        f.write(str(fluid.default_main_program()))
+    with open("startup.proto", "w") as f:
+        f.write(str(fluid.default_startup_program()))
+
     word_dict = paddle.dataset.imdb.word_dict()
     train_data = paddle.batch(
         paddle.reader.shuffle(
@@ -49,13 +54,16 @@ def train(use_cuda=False, is_sparse=True, is_local=True):
         exe.run(fluid.default_startup_program())
 
         for pass_id in xrange(PASS_NUM):
+            batch_id = 0
             for data in train_data():
                 cost_val, acc_val = exe.run(main_program,
                                             feed=feeder.feed(data),
                                             fetch_list=[avg_cost, accuracy])
-                print("cost=" + str(cost_val) + " acc=" + str(acc_val))
-                if math.isnan(float(cost_val)):
-                    sys.exit("got NaN loss, training failed.")
+                if batch_id % 10 == 0:
+                    print("pass_id=" + str(pass_id) + " batch_id=" + str(batch_id) + " cost=" + str(cost_val) + " acc=" + str(acc_val))
+                    if math.isnan(float(cost_val)):
+                        sys.exit("got NaN loss, training failed.")
+                batch_id += 1
 
     if is_local:
         train_loop(fluid.default_main_program())
