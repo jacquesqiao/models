@@ -7,7 +7,12 @@ import paddle.fluid as fluid
 import sys
 
 
-def train(use_cuda=False, is_sparse=True, is_local=True):
+def train(pserver_endpoints,
+          training_role,
+          current_endpoint,
+          trainer_num,
+          trainer_id,
+          use_cuda=False, is_sparse=True, is_local=True):
     PASS_NUM = 1000
     EMBED_SIZE = 1
     BATCH_SIZE = 32
@@ -36,21 +41,18 @@ def train(use_cuda=False, is_sparse=True, is_local=True):
     sgd_optimizer = fluid.optimizer.SGD(learning_rate=0.001)
     optimize_ops, params_grads = sgd_optimizer.minimize(avg_cost)
 
-    with open("main.proto", "w") as f:
-        f.write(str(fluid.default_main_program()))
-    with open("startup.proto", "w") as f:
-        f.write(str(fluid.default_startup_program()))
-
-    word_dict = paddle.dataset.imdb.word_dict()
-    train_data = paddle.batch(
-        paddle.reader.shuffle(
-            paddle.dataset.imdb.train(word_dict), buf_size=1000),
-        batch_size=BATCH_SIZE)
     place = fluid.CUDAPlace(0) if use_cuda else fluid.CPUPlace()
     exe = fluid.Executor(place)
     feeder = fluid.DataFeeder(feed_list=[word, label], place=place)
 
     def train_loop(main_program):
+        # prepare data
+        word_dict = paddle.dataset.imdb.word_dict()
+        train_data = paddle.batch(
+            paddle.reader.shuffle(
+                paddle.dataset.imdb.train(word_dict), buf_size=1000),
+            batch_size=BATCH_SIZE)
+
         exe.run(fluid.default_startup_program())
 
         for pass_id in xrange(PASS_NUM):
@@ -68,25 +70,29 @@ def train(use_cuda=False, is_sparse=True, is_local=True):
     if is_local:
         train_loop(fluid.default_main_program())
     else:
-        port = os.getenv("PADDLE_INIT_PORT", "6174")
-        pserver_ips = os.getenv("PADDLE_INIT_PSERVERS")  # ip,ip...
-        eplist = []
-        for ip in pserver_ips.split(","):
-            eplist.append(':'.join([ip, port]))
-        pserver_endpoints = ",".join(eplist)  # ip:port,ip:port...
-        trainers = int(os.getenv("TRAINERS"))
-        current_endpoint = os.getenv("POD_IP") + ":" + port
-        trainer_id = int(os.getenv("PADDLE_INIT_TRAINER_ID"))
-        training_role = os.getenv("TRAINING_ROLE", "TRAINER")
+        print("dist train")
         t = fluid.DistributeTranspiler()
-        t.transpile(trainer_id, pservers=pserver_endpoints, trainers=trainers)
+        t.transpile(trainer_id, pservers=pserver_endpoints, trainers=trainer_num)
         if training_role == "PSERVER":
+            print("run pserver")
             pserver_prog = t.get_pserver_program(current_endpoint)
             pserver_startup = t.get_startup_program(current_endpoint,
                                                     pserver_prog)
             exe.run(pserver_startup)
             exe.run(pserver_prog)
         elif training_role == "TRAINER":
+            print("run trianer")
             train_loop(t.get_trainer_program())
 
-train()
+
+# port = os.getenv("PADDLE_INIT_PORT", "6174")
+# pserver_ips = os.getenv("PADDLE_INIT_PSERVERS")  # ip,ip...
+# eplist = []
+# for ip in pserver_ips.split(","):
+#     eplist.append(':'.join([ip, port]))
+# pserver_endpoints = ",".join(eplist)  # ip:port,ip:port...
+# trainers = int(os.getenv("TRAINERS"))
+# current_endpoint = os.getenv("POD_IP") + ":" + port
+# trainer_id = int(os.getenv("PADDLE_INIT_TRAINER_ID"))
+# training_role = os.getenv("TRAINING_ROLE", "TRAINER")
+# is_local = bool(int(os.getenv("PADDLE_IS_LOCAL", 1)))
