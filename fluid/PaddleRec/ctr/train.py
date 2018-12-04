@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument(
         '--train_data_path',
         type=str,
-        default='./data/raw/train.txt',
+        default='./data/train.txt',
         help="The path of training dataset")
     parser.add_argument(
         '--test_data_path',
@@ -113,14 +113,14 @@ def parse_args():
 
 def train_loop(args, train_program, py_reader, loss, auc_var, batch_auc_var,
                trainer_num, trainer_id):
-    dataset = reader.CriteoDataset(args.sparse_feature_dim)
-    train_reader = paddle.batch(
-        paddle.reader.shuffle(
-            dataset.train([args.train_data_path], trainer_num, trainer_id),
-            buf_size=args.batch_size * 100),
-        batch_size=args.batch_size)
-
-    py_reader.decorate_paddle_reader(train_reader)
+    # dataset = reader.CriteoDataset(args.sparse_feature_dim)
+    # train_reader = paddle.batch(
+    #     paddle.reader.shuffle(
+    #         dataset.train([args.train_data_path], trainer_num, trainer_id),
+    #         buf_size=args.batch_size * 100),
+    #     batch_size=args.batch_size)
+    #
+    # py_reader.decorate_paddle_reader(train_reader)
     data_name_list = []
 
     place = fluid.CPUPlace()
@@ -146,10 +146,11 @@ def train_loop(args, train_program, py_reader, loss, auc_var, batch_auc_var,
 
     exe.run(fluid.default_startup_program())
 
+    py_reader.start()
     for pass_id in range(args.num_passes):
+        logger.info("pass -> " + str(pass_id))
         pass_start = time.time()
         batch_id = 0
-        py_reader.start()
 
         try:
             while True:
@@ -158,16 +159,20 @@ def train_loop(args, train_program, py_reader, loss, auc_var, batch_auc_var,
                 auc_val = np.mean(auc_val)
                 batch_auc_val = np.mean(batch_auc_val)
 
-                logger.info("TRAIN --> pass: {} batch: {} loss: {} auc: {}, batch_auc: {}"
-                      .format(pass_id, batch_id, loss_val/args.batch_size, auc_val, batch_auc_val))
-                if batch_id % 1000 == 0 and batch_id != 0:
+                logger.info("TRAIN --> pass: {} batch: {} loss: {} auc: {}, batch_auc: {}, queue_size: {}"
+                      .format(pass_id, batch_id, loss_val/args.batch_size, auc_val, batch_auc_val, py_reader.queue.size()))
+                if batch_id % 100 == 0 and batch_id != 0:
                     model_dir = args.model_output_dir + '/batch-' + str(batch_id)
                     if args.trainer_id == 0:
                         fluid.io.save_inference_model(model_dir, data_name_list, [loss, auc_var], exe)
                 batch_id += 1
         except fluid.core.EOFException:
-            py_reader.reset()
-        print("pass_id: %d, pass_time_cost: %f" % (pass_id, time.time() - pass_start))
+            logger.info("pass end -> " + str(pass_id))
+            if pass_id < args.num_passes - 1:
+                logger.info("reset py_reader")
+                py_reader.reset()
+
+        logger.info("pass_id: %d, pass_time_cost: %f" % (pass_id, time.time() - pass_start))
 
         model_dir = args.model_output_dir + '/pass-' + str(pass_id)
         if args.trainer_id == 0:
@@ -183,6 +188,10 @@ def train():
     loss, auc_var, batch_auc_var, py_reader = ctr_dnn_model(args.embedding_size, args.sparse_feature_dim)
     optimizer = fluid.optimizer.Adam(learning_rate=1e-4)
     optimizer.minimize(loss)
+
+    with open("main.proto", "w") as f:
+        f.write(str(fluid.default_main_program()))
+
     if args.cloud_train:
         # the port of all pservers, needed by both trainer and pserver
         port = os.getenv("PADDLE_PORT", "6174")
